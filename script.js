@@ -1,6 +1,6 @@
 // script.js
-import { db } from './firebase-config.js';
-import { ref, onValue } from "firebase/database";
+import { db } from './firebase-config.js';  // Import database dari firebase-config.js
+import { ref, onValue } from "firebase/database";  // Menggunakan ref dan onValue dari Firebase SDK
 
 // DOM Elements
 const tempEl = document.getElementById("temp");
@@ -13,8 +13,8 @@ const ctx = document.getElementById("chart").getContext("2d");
 
 let chart = null;
 
-// Firebase Database Reference (Path yang sesuai dengan Firebase Anda)
-const dataRef = ref(db, 'Tambak/DataTerbaru'); // Pastikan path ini benar sesuai dengan data di Firebase
+// Firebase Database Reference (path yang sesuai dengan Firebase Anda)
+const dataRef = ref(db, 'Tambak/DataTerbaru'); // Path data Firebase
 
 // Firebase Listener untuk mengambil data secara real-time
 onValue(dataRef, (snapshot) => {
