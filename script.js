@@ -25,6 +25,9 @@ let chart = null;
 const chartCanvas = document.getElementById("chart");
 const chartCtx = chartCanvas ? chartCanvas.getContext("2d") : null;
 
+// Storage untuk data history lokal
+let localHistory = [];
+
 // =========================
 // FUNGSI UTILITAS
 // =========================
@@ -40,15 +43,21 @@ function showAlert(message, isError = true) {
         const alertClass = isError ? "alert-danger" : "alert-success";
         elements.alerts.innerHTML = `<div class="alert ${alertClass}">${message}</div>`;
         
-        // Auto remove alert setelah 5 detik
         setTimeout(() => {
             if (elements.alerts) elements.alerts.innerHTML = "";
         }, 5000);
     }
 }
 
+function setStatus(element, text, className) {
+    if (element) {
+        element.textContent = text;
+        element.className = className;
+    }
+}
+
 // =========================
-// FUNGSI CHART - FIXED
+// FUNGSI CHART
 // =========================
 function initializeChart() {
     if (!chartCtx) {
@@ -56,12 +65,10 @@ function initializeChart() {
         return;
     }
 
-    // Destroy existing chart
     if (chart) {
         chart.destroy();
     }
 
-    // Create empty chart first
     chart = new Chart(chartCtx, {
         type: 'line',
         data: {
@@ -102,25 +109,16 @@ function initializeChart() {
             scales: {
                 x: {
                     display: true,
-                    title: {
-                        display: true,
-                        text: 'Waktu'
-                    }
+                    title: { display: true, text: 'Waktu' }
                 },
                 y: {
                     display: true,
-                    title: {
-                        display: true,
-                        text: 'Nilai'
-                    },
+                    title: { display: true, text: 'Nilai' },
                     beginAtZero: true
                 }
             },
             plugins: {
-                legend: {
-                    display: true,
-                    position: 'top'
-                }
+                legend: { display: true, position: 'top' }
             }
         }
     });
@@ -128,30 +126,39 @@ function initializeChart() {
     console.log("✅ Chart initialized");
 }
 
-function updateChartData(labels, tempData, levelData, ntuData) {
-    if (!chart) {
-        console.error("❌ Chart belum diinisialisasi");
-        return;
-    }
+function updateChartFromLocalHistory() {
+    if (!chart || localHistory.length === 0) return;
 
     try {
-        // Update chart data
+        // Ambil maksimal 20 data terbaru
+        const recentData = localHistory.slice(-20);
+        
+        const labels = recentData.map(item => {
+            const date = new Date(item.timestamp);
+            return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`;
+        });
+
+        const tempData = recentData.map(item => item.temperature);
+        const levelData = recentData.map(item => item.levelPercent);
+        const ntuData = recentData.map(item => item.ntu);
+
+        // Update chart
         chart.data.labels = labels;
         chart.data.datasets[0].data = tempData;
         chart.data.datasets[1].data = levelData;
         chart.data.datasets[2].data = ntuData;
-
-        // Update chart
+        
         chart.update('active');
-        console.log("✅ Chart updated dengan", labels.length, "data points");
+        
+        console.log(`✅ Chart updated with ${recentData.length} local data points`);
         
     } catch (error) {
-        console.error("❌ Error updating chart:", error);
+        console.error("❌ Error updating chart from local history:", error);
     }
 }
 
 // =========================
-// FUNGSI DATA HANDLING - FIXED
+// FUNGSI DATA HANDLING - REAL TIME
 // =========================
 async function fetchLatestData() {
     console.log("🔄 Fetching latest data...");
@@ -159,7 +166,6 @@ async function fetchLatestData() {
     try {
         showLoading(true);
         
-        // Gunakan cache buster
         const response = await fetch(`${API_BASE}/api/sensor/latest?t=${Date.now()}`);
         
         if (!response.ok) {
@@ -172,6 +178,12 @@ async function fetchLatestData() {
         // Update UI
         updateUI(data);
         
+        // Tambahkan ke local history untuk chart real-time
+        addToLocalHistory(data);
+        
+        // Update chart dengan data real-time
+        updateChartFromLocalHistory();
+        
     } catch (error) {
         console.error("❌ Error fetching latest data:", error);
         showAlert("Gagal mengambil data terbaru: " + error.message);
@@ -180,38 +192,55 @@ async function fetchLatestData() {
     }
 }
 
-async function fetchHistoryData() {
-    console.log("🔄 Fetching history data...");
-    
+function addToLocalHistory(data) {
     try {
-        // Gunakan cache buster
-        const response = await fetch(`${API_BASE}/api/sensor/history?t=${Date.now()}`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+        const historyItem = {
+            timestamp: data.timestamp || Date.now(),
+            temperature: parseFloat(data.temperature) || 0,
+            levelPercent: parseFloat(data.levelPercent) || 0,
+            ntu: parseFloat(data.ntu) || 0,
+            levelStatus: data.levelStatus || "",
+            turbStatus: data.turbStatus || ""
+        };
+
+        // Cek apakah data benar-benar baru (dalam 30 detik terakhir)
+        const now = Date.now();
+        const isNewData = localHistory.length === 0 || 
+                         (now - localHistory[localHistory.length - 1].timestamp) > 10000; // 10 detik
+
+        if (isNewData) {
+            localHistory.push(historyItem);
+            
+            // Simpan ke localStorage untuk persistensi
+            if (localHistory.length > 50) { // Max 50 data points
+                localHistory = localHistory.slice(-50);
+            }
+            
+            localStorage.setItem('sensorHistory', JSON.stringify(localHistory));
+            console.log("📝 Added to local history, total:", localHistory.length);
         }
-        
-        const data = await response.json();
-        console.log("✅ History data received, items:", data.length);
-        
-        if (!data || data.length === 0) {
-            console.warn("No history data available");
-            showAlert("Data history kosong", false);
-            return;
-        }
-        
-        // Process dan update chart
-        processAndUpdateChart(data);
         
     } catch (error) {
-        console.error("❌ Error fetching history:", error);
-        showAlert("Gagal mengambil data history: " + error.message);
+        console.error("❌ Error adding to local history:", error);
+    }
+}
+
+function loadLocalHistory() {
+    try {
+        const saved = localStorage.getItem('sensorHistory');
+        if (saved) {
+            localHistory = JSON.parse(saved);
+            console.log("📂 Loaded local history:", localHistory.length, "items");
+        }
+    } catch (error) {
+        console.error("❌ Error loading local history:", error);
+        localHistory = [];
     }
 }
 
 function updateUI(data) {
     try {
-        // Update values dengan default fallback
+        // Update values
         if (elements.temp) elements.temp.textContent = (parseFloat(data.temperature) || 0).toFixed(1) + " °C";
         if (elements.level) elements.level.textContent = (parseFloat(data.levelPercent) || 0).toFixed(1) + "%";
         if (elements.ntu) elements.ntu.textContent = (parseFloat(data.ntu) || 0).toFixed(1);
@@ -238,75 +267,34 @@ function updateStatus(data) {
         setStatus(elements.tempStatus, "Terlalu Panas", "status-warning");
     }
 
-    // Water level status
-    if (level < 10) {
-        setStatus(elements.levelStatus, "Air Kurang - Perlu Ditambah", "status-danger");
-    } else if (level <= 70) {
-        setStatus(elements.levelStatus, "Stabil", "status-good");
+    // Water level status - gunakan status dari Firebase jika ada
+    if (data.levelStatus) {
+        const statusClass = data.levelStatus.includes("KOSONG") ? "status-danger" : 
+                          data.levelStatus.includes("Rendah") ? "status-warning" : "status-good";
+        setStatus(elements.levelStatus, data.levelStatus, statusClass);
     } else {
-        setStatus(elements.levelStatus, "Risiko Meluap", "status-warning");
-    }
-
-    // Turbidity status
-    if (ntu < 200) {
-        setStatus(elements.ntuStatus, "Jernih", "status-good");
-    } else if (ntu <= 1000) {
-        setStatus(elements.ntuStatus, "Agak Keruh", "status-warning");
-    } else {
-        setStatus(elements.ntuStatus, "Sangat Keruh - Perlu Sirkulasi", "status-danger");
-    }
-}
-
-function setStatus(element, text, className) {
-    if (element) {
-        element.textContent = text;
-        element.className = className;
-    }
-}
-
-function processAndUpdateChart(data) {
-    try {
-        if (!data || !Array.isArray(data) || data.length === 0) {
-            console.warn("❌ No valid data for chart");
-            return;
+        if (level < 10) {
+            setStatus(elements.levelStatus, "Air Kurang - Perlu Ditambah", "status-danger");
+        } else if (level <= 70) {
+            setStatus(elements.levelStatus, "Stabil", "status-good");
+        } else {
+            setStatus(elements.levelStatus, "Risiko Meluap", "status-warning");
         }
+    }
 
-        // Urutkan data berdasarkan timestamp
-        const sortedData = [...data].sort((a, b) => {
-            return (a.timestamp || 0) - (b.timestamp || 0);
-        });
-
-        // Ambil maksimal 20 data terbaru untuk performance
-        const recentData = sortedData.slice(-20);
-        
-        console.log("📊 Processing chart data:", recentData.length, "items");
-
-        // Prepare labels (waktu)
-        const labels = recentData.map(item => {
-            const date = new Date(item.timestamp || Date.now());
-            return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-        });
-
-        // Prepare data values
-        const tempData = recentData.map(item => parseFloat(item.temperature) || 0);
-        const levelData = recentData.map(item => parseFloat(item.levelPercent) || 0);
-        const ntuData = recentData.map(item => parseFloat(item.ntu) || 0);
-
-        console.log("📈 Chart data ready:", {
-            labels: labels.length,
-            temperatures: tempData,
-            levels: levelData,
-            ntu: ntuData
-        });
-
-        // Update chart dengan data baru
-        updateChartData(labels, tempData, levelData, ntuData);
-        
-        showAlert(`Chart updated dengan ${recentData.length} data points`, false);
-        
-    } catch (error) {
-        console.error("❌ Error processing chart data:", error);
-        showAlert("Error memproses data chart: " + error.message);
+    // Turbidity status - gunakan status dari Firebase jika ada
+    if (data.turbStatus) {
+        const statusClass = data.turbStatus.includes("EKSTREM") ? "status-danger" : 
+                          data.turbStatus.includes("Keruh") ? "status-warning" : "status-good";
+        setStatus(elements.ntuStatus, data.turbStatus, statusClass);
+    } else {
+        if (ntu < 200) {
+            setStatus(elements.ntuStatus, "Jernih", "status-good");
+        } else if (ntu <= 1000) {
+            setStatus(elements.ntuStatus, "Agak Keruh", "status-warning");
+        } else {
+            setStatus(elements.ntuStatus, "Sangat Keruh - Perlu Sirkulasi", "status-danger");
+        }
     }
 }
 
@@ -315,72 +303,56 @@ function processAndUpdateChart(data) {
 // =========================
 window.logout = function() {
     localStorage.removeItem("loggedIn");
+    localStorage.removeItem("sensorHistory");
     window.location.href = "index.html";
 };
 
 window.updateData = fetchLatestData;
-window.updateChart = fetchHistoryData;
 
-// =========================
-// DEBUG FUNCTIONS
-// =========================
-window.debugChart = function() {
-    console.log("🔍 Chart Debug Info:");
+window.debugData = function() {
+    console.log("🔍 Debug Info:");
+    console.log("- Local History:", localHistory);
     console.log("- Chart instance:", chart ? "Exists" : "Null");
-    console.log("- Chart canvas:", chartCanvas ? "Exists" : "Null");
-    console.log("- Chart context:", chartCtx ? "Exists" : "Null");
-    
-    if (chart) {
-        console.log("- Chart data:", {
-            labels: chart.data.labels,
-            datasets: chart.data.datasets.map(d => ({
-                label: d.label,
-                dataPoints: d.data.length
-            }))
-        });
-    }
-    
-    // Test dengan data dummy
-    const testLabels = ['10:00', '10:05', '10:10', '10:15', '10:20'];
-    const testTemp = [25, 26, 27, 26.5, 26];
-    const testLevel = [50, 55, 60, 58, 59];
-    const testNtu = [100, 150, 200, 180, 190];
-    
-    updateChartData(testLabels, testTemp, testLevel, testNtu);
-    showAlert("Debug: Chart diupdate dengan data test", false);
+    console.log("- Latest data:", localHistory[localHistory.length - 1]);
 };
 
-window.forceRefresh = function() {
-    console.log("🔄 Force refreshing all data...");
-    fetchLatestData();
-    fetchHistoryData();
+window.clearHistory = function() {
+    localHistory = [];
+    localStorage.removeItem('sensorHistory');
+    initializeChart();
+    showAlert("History cleared!", false);
+    console.log("🗑️ Local history cleared");
 };
 
 // =========================
-// INITIALIZATION - IMPROVED
+// INITIALIZATION
 // =========================
 document.addEventListener('DOMContentLoaded', function() {
-    console.log("🚀 DOM Loaded - Initializing application...");
+    console.log("🚀 DOM Loaded - Initializing REAL-TIME monitoring...");
     
-    // Initialize chart first
+    // Load existing history dari localStorage
+    loadLocalHistory();
+    
+    // Initialize chart
     initializeChart();
     
-    // Load initial data setelah chart siap
+    // Jika ada history, update chart
+    if (localHistory.length > 0) {
+        updateChartFromLocalHistory();
+    }
+    
+    // Load data pertama kali
     setTimeout(() => {
-        console.log("📥 Loading initial data...");
         fetchLatestData();
-        fetchHistoryData();
     }, 500);
     
-    // Setup auto-refresh
-    setInterval(fetchLatestData, 10000); // 10 detik untuk data terbaru
-    setInterval(fetchHistoryData, 30000); // 30 detik untuk history
+    // Auto-refresh data terbaru setiap 5 detik
+    setInterval(fetchLatestData, 5000);
     
-    console.log("✅ Auto-refresh configured");
+    console.log("✅ Real-time monitoring initialized (5s interval)");
 });
 
-// Error handling global
+// Global error handler
 window.addEventListener('error', function(e) {
     console.error("💥 Global Error:", e.error);
-    showAlert("Terjadi error: " + e.error?.message || "Unknown error");
 });
