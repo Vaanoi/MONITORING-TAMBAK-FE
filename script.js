@@ -3,6 +3,13 @@
 // =========================
 const API_BASE = "https://vaanoimonitoringtambak.vercel.app";
 
+// Threshold untuk peringatan
+const ALERT_THRESHOLDS = {
+    TEMP_HIGH: 50,      // Suhu di atas 50°C - BERBAHAYA!
+    LEVEL_HIGH: 85,     // Level air di atas 85% - RISIKO BANJIR!
+    NTU_HIGH: 1800      // Kekeruhan di atas 1800 NTU - SANGAT KERUH!
+};
+
 // Cek login
 if (!localStorage.getItem("loggedIn")) {
     window.location.href = "index.html";
@@ -29,6 +36,13 @@ const chartCtx = chartCanvas ? chartCanvas.getContext("2d") : null;
 let localHistory = [];
 const MAX_HISTORY_ITEMS = 15; // Simpan 15 data terakhir
 
+// Tracking alert state untuk menghindari spam notifikasi
+let alertState = {
+    tempHigh: false,
+    levelHigh: false,
+    ntuHigh: false
+};
+
 // =========================
 // FUNGSI UTILITAS WAKTU
 // =========================
@@ -48,6 +62,36 @@ function showAlert(message, isError = true) {
             if (elements.alerts) elements.alerts.innerHTML = "";
         }, 5000);
     }
+}
+
+// FUNGSI BARU: Tampilkan peringatan bahaya dengan style khusus
+function showDangerAlert(message) {
+    console.log("🚨 DANGER ALERT:", message);
+    if (elements.alerts) {
+        const alertDiv = document.createElement("div");
+        alertDiv.className = "alert alert-danger alert-custom danger-alert";
+        alertDiv.innerHTML = `
+            <div class="danger-alert-content">
+                <i class="fas fa-exclamation-triangle"></i>
+                <strong>PERINGATAN BAHAYA!</strong>
+                <span>${message}</span>
+                <button class="alert-close" onclick="this.parentElement.parentElement.remove()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `;
+        elements.alerts.appendChild(alertDiv);
+        
+        // Auto remove setelah 10 detik untuk alert bahaya
+        setTimeout(() => {
+            if (alertDiv.parentElement) {
+                alertDiv.remove();
+            }
+        }, 10000);
+    }
+    
+    // Tambahkan sound alert (jika diinginkan)
+    // playAlertSound();
 }
 
 function setStatus(element, text, className) {
@@ -77,6 +121,75 @@ function getCurrentIndonesiaTime() {
     const minutes = String(now.getMinutes()).padStart(2, '0');
     const seconds = String(now.getSeconds()).padStart(2, '0');
     return `${hours}:${minutes}:${seconds}`;
+}
+
+// =========================
+// FUNGSI CHECK ALERT - BARU
+// =========================
+function checkDangerAlerts(data) {
+    const temperature = parseFloat(data.temperature) || 0;
+    const levelPercent = parseFloat(data.levelPercent) || 0;
+    const ntu = parseFloat(data.ntu) || 0;
+    
+    const alerts = [];
+    const newAlertState = {
+        tempHigh: false,
+        levelHigh: false,
+        ntuHigh: false
+    };
+
+    // Check suhu tinggi
+    if (temperature > ALERT_THRESHOLDS.TEMP_HIGH) {
+        alerts.push({
+            type: 'tempHigh',
+            message: `🚨 SUHU SANGAT TINGGI! ${temperature}°C - Bahaya untuk ikan!`,
+            value: temperature
+        });
+        newAlertState.tempHigh = true;
+        
+        // Update status dengan warna danger
+        setStatus(elements.tempStatus, `BAHAYA! ${temperature}°C`, "status-danger");
+    }
+
+    // Check level air tinggi
+    if (levelPercent > ALERT_THRESHOLDS.LEVEL_HIGH) {
+        alerts.push({
+            type: 'levelHigh',
+            message: `🚨 LEVEL AIR KRITIS! ${levelPercent}% - Risiko banjir/bocor!`,
+            value: levelPercent
+        });
+        newAlertState.levelHigh = true;
+        
+        // Update status dengan warna danger
+        setStatus(elements.levelStatus, `BAHAYA! ${levelPercent}%`, "status-danger");
+    }
+
+    // Check kekeruhan tinggi
+    if (ntu > ALERT_THRESHOLDS.NTU_HIGH) {
+        alerts.push({
+            type: 'ntuHigh',
+            message: `🚨 KUALITAS AIR KRITIS! ${ntu} NTU - Air sangat keruh!`,
+            value: ntu
+        });
+        newAlertState.ntuHigh = true;
+        
+        // Update status dengan warna danger
+        setStatus(elements.ntuStatus, `BAHAYA! ${ntu} NTU`, "status-danger");
+    }
+
+    // Cek perubahan state untuk menghindari spam notifikasi
+    const shouldShowAlert = 
+        (newAlertState.tempHigh && !alertState.tempHigh) ||
+        (newAlertState.levelHigh && !alertState.levelHigh) ||
+        (newAlertState.ntuHigh && !alertState.ntuHigh);
+
+    // Update alert state
+    alertState = newAlertState;
+
+    return {
+        alerts: alerts,
+        shouldShow: shouldShowAlert
+    };
 }
 
 // =========================
@@ -178,14 +291,6 @@ function updateChartFromLocalHistory() {
         const levelData = displayData.map(item => item.levelPercent);
         const ntuData = displayData.map(item => item.ntu);
 
-        // Debug: Tampilkan informasi data
-        console.log("📈 Data range:", {
-            labels: labels,
-            temperatures: tempData,
-            levels: levelData,
-            ntu: ntuData
-        });
-
         // Update chart
         chart.data.labels = labels;
         chart.data.datasets[0].data = tempData;
@@ -222,6 +327,14 @@ async function fetchLatestData() {
         
         // Update UI dengan data terbaru
         updateUI(data);
+        
+        // CHECK DANGER ALERTS
+        const alertCheck = checkDangerAlerts(data);
+        if (alertCheck.shouldShow && alertCheck.alerts.length > 0) {
+            alertCheck.alerts.forEach(alert => {
+                showDangerAlert(alert.message);
+            });
+        }
         
         // Tambahkan ke local history dengan timestamp sekarang
         addToLocalHistory(data);
@@ -316,13 +429,17 @@ function generateSampleData() {
 
 function updateUI(data) {
     try {
-        // Update values dengan data terbaru
-        if (elements.temp) elements.temp.textContent = (parseFloat(data.temperature) || 0).toFixed(1) + " °C";
-        if (elements.level) elements.level.textContent = (parseFloat(data.levelPercent) || 0).toFixed(1) + "%";
-        if (elements.ntu) elements.ntu.textContent = (parseFloat(data.ntu) || 0).toFixed(1);
+        const temperature = parseFloat(data.temperature) || 0;
+        const levelPercent = parseFloat(data.levelPercent) || 0;
+        const ntu = parseFloat(data.ntu) || 0;
 
-        // Update status
-        updateStatus(data);
+        // Update values dengan data terbaru
+        if (elements.temp) elements.temp.textContent = temperature.toFixed(1) + " °C";
+        if (elements.level) elements.level.textContent = levelPercent.toFixed(1) + "%";
+        if (elements.ntu) elements.ntu.textContent = ntu.toFixed(1);
+
+        // Update status (jika tidak dalam kondisi bahaya, gunakan status normal)
+        if (!alertState.tempHigh) updateStatus(data);
         
         // Update last update time display
         updateLastUpdateTime();
@@ -342,21 +459,21 @@ function updateStatus(data) {
     const level = parseFloat(data.levelPercent) || 0;
     const ntu = parseFloat(data.ntu) || 0;
 
-    // Temperature status
+    // Temperature status (jika tidak dalam kondisi bahaya)
     if (temp >= 25 && temp <= 30) {
         setStatus(elements.tempStatus, "Ideal (25-30°C)", "status-good");
     } else if (temp < 25) {
         setStatus(elements.tempStatus, "Terlalu Dingin", "status-warning");
-    } else {
+    } else if (temp <= 50) {
         setStatus(elements.tempStatus, "Terlalu Panas", "status-warning");
     }
 
-    // Water level status
-    if (data.levelStatus) {
+    // Water level status (jika tidak dalam kondisi bahaya)
+    if (data.levelStatus && level <= ALERT_THRESHOLDS.LEVEL_HIGH) {
         const statusClass = data.levelStatus.includes("KOSONG") ? "status-danger" : 
                           data.levelStatus.includes("Rendah") ? "status-warning" : "status-good";
         setStatus(elements.levelStatus, data.levelStatus, statusClass);
-    } else {
+    } else if (level <= ALERT_THRESHOLDS.LEVEL_HIGH) {
         if (level < 10) {
             setStatus(elements.levelStatus, "Air Kurang - Perlu Ditambah", "status-danger");
         } else if (level <= 70) {
@@ -366,12 +483,12 @@ function updateStatus(data) {
         }
     }
 
-    // Turbidity status
-    if (data.turbStatus) {
+    // Turbidity status (jika tidak dalam kondisi bahaya)
+    if (data.turbStatus && ntu <= ALERT_THRESHOLDS.NTU_HIGH) {
         const statusClass = data.turbStatus.includes("EKSTREM") ? "status-danger" : 
                           data.turbStatus.includes("Keruh") ? "status-warning" : "status-good";
         setStatus(elements.ntuStatus, data.turbStatus, statusClass);
-    } else {
+    } else if (ntu <= ALERT_THRESHOLDS.NTU_HIGH) {
         if (ntu < 200) {
             setStatus(elements.ntuStatus, "Jernih", "status-good");
         } else if (ntu <= 1000) {
@@ -393,10 +510,47 @@ window.logout = function() {
 
 window.updateData = fetchLatestData;
 
+// FUNGSI BARU: Test alert system
+window.testAlerts = function() {
+    console.log("🧪 Testing alert system...");
+    
+    const testData = {
+        temperature: 55, // Di atas 50°C
+        levelPercent: 90, // Di atas 85%
+        ntu: 2000, // Di atas 1800 NTU
+        levelStatus: "SEDANG",
+        turbStatus: "JERNIH"
+    };
+    
+    const alertCheck = checkDangerAlerts(testData);
+    if (alertCheck.alerts.length > 0) {
+        alertCheck.alerts.forEach(alert => {
+            showDangerAlert(alert.message);
+        });
+        showAlert("Test alerts triggered! Check the danger alerts above.", false);
+    }
+};
+
+// FUNGSI BARU: Clear all alerts
+window.clearAlerts = function() {
+    if (elements.alerts) {
+        elements.alerts.innerHTML = "";
+    }
+    // Reset alert state
+    alertState = {
+        tempHigh: false,
+        levelHigh: false,
+        ntuHigh: false
+    };
+    showAlert("All alerts cleared", false);
+};
+
 window.debugHistory = function() {
     console.log("📊 History Debug Info:");
     console.log("- Total history items:", localHistory.length);
     console.log("- Current time:", getCurrentIndonesiaTime());
+    console.log("- Alert thresholds:", ALERT_THRESHOLDS);
+    console.log("- Current alert state:", alertState);
     
     if (localHistory.length > 0) {
         console.log("- All data points:");
@@ -432,6 +586,7 @@ window.clearHistory = function() {
     localHistory = [];
     localStorage.removeItem('sensorHistory');
     initializeChart();
+    clearAlerts();
     showAlert("History cleared!", false);
     console.log("🗑️ Local history cleared");
 };
@@ -442,6 +597,7 @@ window.clearHistory = function() {
 document.addEventListener('DOMContentLoaded', function() {
     console.log("🚀 DOM Loaded - Initializing Real-time Monitoring with History...");
     console.log("🕒 Current time:", getCurrentIndonesiaTime());
+    console.log("🚨 Alert thresholds configured:", ALERT_THRESHOLDS);
     
     // Load existing history
     loadLocalHistory();
