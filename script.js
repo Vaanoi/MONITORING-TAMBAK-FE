@@ -1,3 +1,4 @@
+// script.js
 import { db } from './firebase-config.js'; // Import database dari firebase-config.js
 import { ref, onValue } from "firebase/database"; // Menggunakan ref dan onValue dari Firebase SDK
 
@@ -13,7 +14,7 @@ const ctx = document.getElementById("chart").getContext("2d");
 let chart = null;
 
 // Firebase Database Reference (path yang sudah disesuaikan)
-const dataRef = ref(db, 'Tambak/DataTerbaru'); // Gantilah path sesuai dengan struktur Firebase Anda
+const dataRef = ref(db, 'Tambak/DataTerbaru'); // Path yang benar sesuai dengan struktur Firebase Anda
 
 // Listen for data changes in Firebase
 onValue(dataRef, (snapshot) => {
@@ -37,7 +38,7 @@ onValue(dataRef, (snapshot) => {
     console.log("Data tidak ada atau tidak valid.");
   }
 }, (error) => {
-  console.error("Error Firebase:", error); // Log error jika ada masalah dengan koneksi Firebase
+  console.error("Error Firebase:", error);  // Log error jika ada masalah dengan koneksi Firebase
 });
 
 // Fungsi untuk memperbarui elemen UI
@@ -78,16 +79,16 @@ function updateUIElements(data) {
   }
 }
 
-// Fungsi untuk membuat chart
+// Fungsi untuk membuat chart history
 function createChart(labels, tempData, levelData, ntuData) {
   if (chart) {
-    chart.destroy();  // Hapus chart lama
+    chart.destroy();  // Hapus chart lama untuk update dengan data baru
   }
 
   chart = new Chart(ctx, {
     type: "line",
     data: {
-      labels: labels,
+      labels: labels,  // Label berdasarkan timestamp
       datasets: [
         {
           label: "Suhu (°C)",
