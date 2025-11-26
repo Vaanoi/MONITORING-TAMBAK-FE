@@ -29,7 +29,7 @@ const chartCtx = chartCanvas ? chartCanvas.getContext("2d") : null;
 let localHistory = [];
 
 // =========================
-// FUNGSI UTILITAS
+// FUNGSI UTILITAS WAKTU - DIPERBAIKI
 // =========================
 function showLoading(show) {
     if (elements.loading) {
@@ -56,8 +56,37 @@ function setStatus(element, text, className) {
     }
 }
 
+// FUNGSI BARU: Format waktu yang benar
+function formatTime(timestamp) {
+    const date = new Date(timestamp);
+    return {
+        time: `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`,
+        full: date.toLocaleTimeString('id-ID'),
+        date: date.toLocaleDateString('id-ID')
+    };
+}
+
+// FUNGSI BARU: Handle timestamp dari Firebase
+function parseFirebaseTimestamp(timestamp) {
+    // Jika timestamp dari Firebase berupa angka kecil (seperti 650150), 
+    // kemungkinan itu adalah detik, bukan milidetik
+    if (timestamp && timestamp < 1000000000) {
+        console.log("🕒 Firebase timestamp detected (seconds):", timestamp);
+        return timestamp * 1000; // Convert detik ke milidetik
+    }
+    
+    // Jika timestamp sudah dalam milidetik, gunakan langsung
+    if (timestamp && timestamp > 1000000000000) {
+        return timestamp;
+    }
+    
+    // Jika tidak valid, gunakan waktu sekarang
+    console.log("🕒 Using current time for timestamp");
+    return Date.now();
+}
+
 // =========================
-// FUNGSI CHART
+// FUNGSI CHART - DIPERBAIKI
 // =========================
 function initializeChart() {
     if (!chartCtx) {
@@ -109,7 +138,15 @@ function initializeChart() {
             scales: {
                 x: {
                     display: true,
-                    title: { display: true, text: 'Waktu' }
+                    title: { display: true, text: 'Waktu' },
+                    ticks: {
+                        maxTicksLimit: 8, // Max 8 label untuk readability
+                        callback: function(value, index, values) {
+                            // Hanya tampilkan beberapa label untuk menghindari overcrowding
+                            if (values.length <= 8) return this.getLabelForValue(value);
+                            return index % Math.ceil(values.length / 8) === 0 ? this.getLabelForValue(value) : '';
+                        }
+                    }
                 },
                 y: {
                     display: true,
@@ -118,7 +155,17 @@ function initializeChart() {
                 }
             },
             plugins: {
-                legend: { display: true, position: 'top' }
+                legend: { display: true, position: 'top' },
+                tooltip: {
+                    callbacks: {
+                        title: function(tooltipItems) {
+                            // Tampilkan waktu lengkap di tooltip
+                            const dataIndex = tooltipItems[0].dataIndex;
+                            const label = tooltipItems[0].chart.data.labels[dataIndex];
+                            return `Waktu: ${label}`;
+                        }
+                    }
+                }
             }
         }
     });
@@ -130,17 +177,27 @@ function updateChartFromLocalHistory() {
     if (!chart || localHistory.length === 0) return;
 
     try {
-        // Ambil maksimal 20 data terbaru
-        const recentData = localHistory.slice(-20);
+        // Ambil maksimal 15 data terbaru untuk performance
+        const recentData = localHistory.slice(-15);
         
+        console.log("📊 Updating chart with:", recentData.length, "data points");
+        
+        // Format labels dengan waktu yang benar
         const labels = recentData.map(item => {
-            const date = new Date(item.timestamp);
-            return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`;
+            const timeInfo = formatTime(item.timestamp);
+            return timeInfo.time;
         });
 
         const tempData = recentData.map(item => item.temperature);
         const levelData = recentData.map(item => item.levelPercent);
         const ntuData = recentData.map(item => item.ntu);
+
+        // Debug: Tampilkan data terbaru
+        if (recentData.length > 0) {
+            const latest = recentData[recentData.length - 1];
+            const latestTime = formatTime(latest.timestamp);
+            console.log("🕒 Latest data time:", latestTime.full);
+        }
 
         // Update chart
         chart.data.labels = labels;
@@ -150,7 +207,7 @@ function updateChartFromLocalHistory() {
         
         chart.update('active');
         
-        console.log(`✅ Chart updated with ${recentData.length} local data points`);
+        console.log(`✅ Chart updated at ${new Date().toLocaleTimeString()}`);
         
     } catch (error) {
         console.error("❌ Error updating chart from local history:", error);
@@ -158,7 +215,7 @@ function updateChartFromLocalHistory() {
 }
 
 // =========================
-// FUNGSI DATA HANDLING - REAL TIME
+// FUNGSI DATA HANDLING - DIPERBAIKI
 // =========================
 async function fetchLatestData() {
     console.log("🔄 Fetching latest data...");
@@ -178,7 +235,7 @@ async function fetchLatestData() {
         // Update UI
         updateUI(data);
         
-        // Tambahkan ke local history untuk chart real-time
+        // Tambahkan ke local history dengan timestamp yang benar
         addToLocalHistory(data);
         
         // Update chart dengan data real-time
@@ -194,8 +251,19 @@ async function fetchLatestData() {
 
 function addToLocalHistory(data) {
     try {
+        // Parse timestamp dengan benar
+        const correctedTimestamp = parseFirebaseTimestamp(data.timestamp);
+        const now = Date.now();
+        
+        console.log("🕒 Timestamp info:", {
+            original: data.timestamp,
+            corrected: correctedTimestamp,
+            current: now,
+            difference: now - correctedTimestamp
+        });
+
         const historyItem = {
-            timestamp: data.timestamp || Date.now(),
+            timestamp: correctedTimestamp,
             temperature: parseFloat(data.temperature) || 0,
             levelPercent: parseFloat(data.levelPercent) || 0,
             ntu: parseFloat(data.ntu) || 0,
@@ -203,21 +271,22 @@ function addToLocalHistory(data) {
             turbStatus: data.turbStatus || ""
         };
 
-        // Cek apakah data benar-benar baru (dalam 30 detik terakhir)
-        const now = Date.now();
+        // Cek apakah data benar-benar baru (beda dengan data terakhir)
         const isNewData = localHistory.length === 0 || 
-                         (now - localHistory[localHistory.length - 1].timestamp) > 10000; // 10 detik
+                         (correctedTimestamp - localHistory[localHistory.length - 1].timestamp) > 5000; // 5 detik
 
         if (isNewData) {
             localHistory.push(historyItem);
             
             // Simpan ke localStorage untuk persistensi
-            if (localHistory.length > 50) { // Max 50 data points
-                localHistory = localHistory.slice(-50);
+            if (localHistory.length > 30) { // Max 30 data points
+                localHistory = localHistory.slice(-30);
             }
             
             localStorage.setItem('sensorHistory', JSON.stringify(localHistory));
-            console.log("📝 Added to local history, total:", localHistory.length);
+            console.log("📝 Added to local history at:", formatTime(correctedTimestamp).full);
+        } else {
+            console.log("⏭️ Skipping duplicate data");
         }
         
     } catch (error) {
@@ -231,6 +300,12 @@ function loadLocalHistory() {
         if (saved) {
             localHistory = JSON.parse(saved);
             console.log("📂 Loaded local history:", localHistory.length, "items");
+            
+            // Tampilkan waktu data terakhir
+            if (localHistory.length > 0) {
+                const lastTime = formatTime(localHistory[localHistory.length - 1].timestamp);
+                console.log("🕒 Last data time:", lastTime.full);
+            }
         }
     } catch (error) {
         console.error("❌ Error loading local history:", error);
@@ -248,9 +323,24 @@ function updateUI(data) {
         // Update status
         updateStatus(data);
         
+        // Update last update time
+        updateLastUpdateTime();
+        
     } catch (error) {
         console.error("❌ Error updating UI:", error);
     }
+}
+
+// FUNGSI BARU: Tampilkan waktu update terakhir
+function updateLastUpdateTime() {
+    const now = new Date();
+    const timeString = now.toLocaleTimeString('id-ID');
+    const dateString = now.toLocaleDateString('id-ID');
+    
+    console.log("🕒 Data updated at:", timeString);
+    
+    // Bisa tambahkan elemen untuk menampilkan waktu update jika mau
+    // Contoh: document.getElementById('lastUpdate').textContent = `Terakhir update: ${timeString}`;
 }
 
 function updateStatus(data) {
@@ -309,26 +399,44 @@ window.logout = function() {
 
 window.updateData = fetchLatestData;
 
-window.debugData = function() {
-    console.log("🔍 Debug Info:");
-    console.log("- Local History:", localHistory);
+window.debugTime = function() {
+    console.log("🕒 Time Debug Info:");
+    console.log("- Current time:", new Date().toLocaleString('id-ID'));
+    console.log("- Local history length:", localHistory.length);
+    
+    if (localHistory.length > 0) {
+        console.log("- Latest 3 data points:");
+        localHistory.slice(-3).forEach((item, index) => {
+            const timeInfo = formatTime(item.timestamp);
+            console.log(`  ${index + 1}. ${timeInfo.full} - Temp: ${item.temperature}°C`);
+        });
+    }
+    
     console.log("- Chart instance:", chart ? "Exists" : "Null");
-    console.log("- Latest data:", localHistory[localHistory.length - 1]);
 };
 
-window.clearHistory = function() {
-    localHistory = [];
-    localStorage.removeItem('sensorHistory');
-    initializeChart();
-    showAlert("History cleared!", false);
-    console.log("🗑️ Local history cleared");
+window.simulateNewData = function() {
+    // Fungsi untuk testing: tambah data dummy dengan timestamp sekarang
+    const testData = {
+        timestamp: Date.now(),
+        temperature: 25 + Math.random() * 5,
+        levelPercent: 40 + Math.random() * 30,
+        ntu: Math.random() * 500,
+        levelStatus: "SEDANG",
+        turbStatus: "JERNIH"
+    };
+    
+    addToLocalHistory(testData);
+    updateChartFromLocalHistory();
+    showAlert("Data test ditambahkan!", false);
 };
 
 // =========================
-// INITIALIZATION
+// INITIALIZATION - DIPERBAIKI
 // =========================
 document.addEventListener('DOMContentLoaded', function() {
     console.log("🚀 DOM Loaded - Initializing REAL-TIME monitoring...");
+    console.log("🕒 Current time:", new Date().toLocaleString('id-ID'));
     
     // Load existing history dari localStorage
     loadLocalHistory();
@@ -344,7 +452,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load data pertama kali
     setTimeout(() => {
         fetchLatestData();
-    }, 500);
+    }, 1000);
     
     // Auto-refresh data terbaru setiap 5 detik
     setInterval(fetchLatestData, 5000);
