@@ -25,11 +25,12 @@ let chart = null;
 const chartCanvas = document.getElementById("chart");
 const chartCtx = chartCanvas ? chartCanvas.getContext("2d") : null;
 
-// Storage untuk data history lokal
+// Storage untuk data history lokal - SIMPAN LEBIH BANYAK DATA
 let localHistory = [];
+const MAX_HISTORY_ITEMS = 15; // Simpan 15 data terakhir
 
 // =========================
-// FUNGSI UTILITAS WAKTU - FIXED FORMAT
+// FUNGSI UTILITAS WAKTU
 // =========================
 function showLoading(show) {
     if (elements.loading) {
@@ -56,11 +57,9 @@ function setStatus(element, text, className) {
     }
 }
 
-// FUNGSI WAKTU YANG DIPERBAIKI - FORMAT INDONESIA
+// Format waktu Indonesia
 function formatTime(timestamp) {
     const date = new Date(timestamp);
-    
-    // Format manual untuk konsistensi: HH:MM:SS
     const hours = String(date.getHours()).padStart(2, '0');
     const minutes = String(date.getMinutes()).padStart(2, '0');
     const seconds = String(date.getSeconds()).padStart(2, '0');
@@ -72,7 +71,6 @@ function formatTime(timestamp) {
     };
 }
 
-// FUNGSI BARU: Dapatkan waktu sekarang dalam format Indonesia
 function getCurrentIndonesiaTime() {
     const now = new Date();
     const hours = String(now.getHours()).padStart(2, '0');
@@ -81,22 +79,8 @@ function getCurrentIndonesiaTime() {
     return `${hours}:${minutes}:${seconds}`;
 }
 
-// FUNGSI BARU: Buat timestamp dengan offset WIB (UTC+7)
-function createWIBTimestamp() {
-    const now = new Date();
-    // WIB = UTC + 7 hours
-    const wibOffset = 7 * 60 * 60 * 1000; // 7 jam dalam milidetik
-    return now.getTime() + wibOffset;
-}
-
-// FUNGSI BARU: Convert ke WIB time
-function toWIBTime(timestamp) {
-    const wibOffset = 7 * 60 * 60 * 1000;
-    return new Date(timestamp + wibOffset);
-}
-
 // =========================
-// FUNGSI CHART - FORMAT WAKTU FIXED
+// FUNGSI CHART - TAMPILKAN LEBIH BANYAK DATA
 // =========================
 function initializeChart() {
     if (!chartCtx) {
@@ -150,10 +134,10 @@ function initializeChart() {
                     display: true,
                     title: { display: true, text: 'Waktu' },
                     ticks: {
-                        maxTicksLimit: 6,
+                        maxTicksLimit: 8,
                         callback: function(value, index, values) {
-                            if (values.length <= 6) return this.getLabelForValue(value);
-                            return index % Math.ceil(values.length / 6) === 0 ? this.getLabelForValue(value) : '';
+                            if (values.length <= 8) return this.getLabelForValue(value);
+                            return index % Math.ceil(values.length / 8) === 0 ? this.getLabelForValue(value) : '';
                         }
                     }
                 },
@@ -173,30 +157,34 @@ function initializeChart() {
 }
 
 function updateChartFromLocalHistory() {
-    if (!chart || localHistory.length === 0) return;
+    if (!chart || localHistory.length === 0) {
+        console.log("📊 No data available for chart");
+        return;
+    }
 
     try {
-        // Ambil data terbaru (maksimal 8 data untuk readability)
-        const recentData = localHistory.slice(-8);
+        // TAMPILKAN SEMUA DATA HISTORY YANG ADA (maksimal 15)
+        const displayData = localHistory.slice(-MAX_HISTORY_ITEMS);
         
-        console.log("📊 Updating chart with:", recentData.length, "data points");
+        console.log("📊 Updating chart with:", displayData.length, "data points");
         console.log("🕒 Current time:", getCurrentIndonesiaTime());
         
         // Format labels dengan waktu yang benar
-        const labels = recentData.map(item => {
+        const labels = displayData.map(item => {
             return formatTime(item.timestamp).time;
         });
 
-        const tempData = recentData.map(item => item.temperature);
-        const levelData = recentData.map(item => item.levelPercent);
-        const ntuData = recentData.map(item => item.ntu);
+        const tempData = displayData.map(item => item.temperature);
+        const levelData = displayData.map(item => item.levelPercent);
+        const ntuData = displayData.map(item => item.ntu);
 
-        // Debug: Tampilkan data waktu
-        console.log("🏷️ Chart labels:", labels);
-        if (recentData.length > 0) {
-            const latest = recentData[recentData.length - 1];
-            console.log("🕒 Latest data timestamp:", new Date(latest.timestamp).toString());
-        }
+        // Debug: Tampilkan informasi data
+        console.log("📈 Data range:", {
+            labels: labels,
+            temperatures: tempData,
+            levels: levelData,
+            ntu: ntuData
+        });
 
         // Update chart
         chart.data.labels = labels;
@@ -206,7 +194,7 @@ function updateChartFromLocalHistory() {
         
         chart.update('active');
         
-        console.log(`✅ Chart updated at ${getCurrentIndonesiaTime()}`);
+        console.log(`✅ Chart updated with ${displayData.length} historical data points`);
         
     } catch (error) {
         console.error("❌ Error updating chart from local history:", error);
@@ -214,7 +202,7 @@ function updateChartFromLocalHistory() {
 }
 
 // =========================
-// FUNGSI DATA HANDLING - GUNAKAN WAKTU SEKARANG
+// FUNGSI DATA HANDLING - SIMPAN LEBIH BANYAK DATA
 // =========================
 async function fetchLatestData() {
     console.log("🔄 Fetching latest data...");
@@ -232,13 +220,13 @@ async function fetchLatestData() {
         const data = await response.json();
         console.log("✅ Latest data received:", data);
         
-        // Update UI
+        // Update UI dengan data terbaru
         updateUI(data);
         
         // Tambahkan ke local history dengan timestamp sekarang
         addToLocalHistory(data);
         
-        // Update chart dengan data real-time
+        // Update chart dengan SEMUA data history
         updateChartFromLocalHistory();
         
     } catch (error) {
@@ -251,13 +239,12 @@ async function fetchLatestData() {
 
 function addToLocalHistory(data) {
     try {
-        // GUNAKAN WAKTU SEKARANG - jangan pakai timestamp dari Firebase
         const currentTimestamp = Date.now();
         
-        console.log("🕒 Using current timestamp:", new Date(currentTimestamp).toString());
+        console.log("🕒 Adding data at:", formatTime(currentTimestamp).time);
 
         const historyItem = {
-            timestamp: currentTimestamp, // Gunakan waktu sekarang
+            timestamp: currentTimestamp,
             temperature: parseFloat(data.temperature) || 0,
             levelPercent: parseFloat(data.levelPercent) || 0,
             ntu: parseFloat(data.ntu) || 0,
@@ -265,23 +252,17 @@ function addToLocalHistory(data) {
             turbStatus: data.turbStatus || ""
         };
 
-        // Selalu tambahkan data baru (kita akan filter duplikat nanti)
+        // SELALU TAMBAHKAN DATA BARU KE HISTORY
         localHistory.push(historyItem);
         
-        // Filter data duplikat (dalam 5 detik terakhir dianggap duplikat)
-        const now = Date.now();
-        localHistory = localHistory.filter(item => {
-            return (now - item.timestamp) < 5000 || 
-                   localHistory.indexOf(item) === localHistory.length - 1;
-        });
-
-        // Simpan ke localStorage
-        if (localHistory.length > 20) {
-            localHistory = localHistory.slice(-20);
+        // Batasi jumlah data yang disimpan
+        if (localHistory.length > MAX_HISTORY_ITEMS) {
+            localHistory = localHistory.slice(-MAX_HISTORY_ITEMS);
         }
         
+        // Simpan ke localStorage
         localStorage.setItem('sensorHistory', JSON.stringify(localHistory));
-        console.log("📝 Added to local history at:", formatTime(currentTimestamp).time);
+        console.log("📝 History updated. Total items:", localHistory.length);
         
     } catch (error) {
         console.error("❌ Error adding to local history:", error);
@@ -306,9 +287,36 @@ function loadLocalHistory() {
     }
 }
 
+// FUNGSI BARU: Generate data dummy untuk testing jika tidak ada data
+function generateSampleData() {
+    if (localHistory.length === 0) {
+        console.log("🔧 Generating sample data for testing...");
+        
+        const now = Date.now();
+        const sampleData = [];
+        
+        // Buat 5 data sample dengan interval 2 menit
+        for (let i = 4; i >= 0; i--) {
+            const timestamp = now - (i * 2 * 60 * 1000); // 2 menit intervals
+            sampleData.push({
+                timestamp: timestamp,
+                temperature: 25 + Math.random() * 3,
+                levelPercent: 45 + Math.random() * 20,
+                ntu: Math.random() * 300,
+                levelStatus: "SEDANG",
+                turbStatus: "JERNIH"
+            });
+        }
+        
+        localHistory = sampleData;
+        localStorage.setItem('sensorHistory', JSON.stringify(localHistory));
+        console.log("✅ Generated", sampleData.length, "sample data points");
+    }
+}
+
 function updateUI(data) {
     try {
-        // Update values
+        // Update values dengan data terbaru
         if (elements.temp) elements.temp.textContent = (parseFloat(data.temperature) || 0).toFixed(1) + " °C";
         if (elements.level) elements.level.textContent = (parseFloat(data.levelPercent) || 0).toFixed(1) + "%";
         if (elements.ntu) elements.ntu.textContent = (parseFloat(data.ntu) || 0).toFixed(1);
@@ -385,53 +393,66 @@ window.logout = function() {
 
 window.updateData = fetchLatestData;
 
-window.debugTime = function() {
-    console.log("🕒 Time Debug Info:");
+window.debugHistory = function() {
+    console.log("📊 History Debug Info:");
+    console.log("- Total history items:", localHistory.length);
     console.log("- Current time:", getCurrentIndonesiaTime());
-    console.log("- Browser time:", new Date().toString());
-    console.log("- Timezone:", Intl.DateTimeFormat().resolvedOptions().timeZone);
-    console.log("- Local history length:", localHistory.length);
     
     if (localHistory.length > 0) {
-        console.log("- All timestamps in history:");
+        console.log("- All data points:");
         localHistory.forEach((item, index) => {
             const timeInfo = formatTime(item.timestamp);
-            console.log(`  ${index + 1}. ${timeInfo.time} - ${new Date(item.timestamp).toString()}`);
+            console.log(`  ${index + 1}. ${timeInfo.time} - Temp: ${item.temperature}°C, Level: ${item.levelPercent}%, NTU: ${item.ntu}`);
         });
+    } else {
+        console.log("- No history data available");
     }
 };
 
-window.fixTimeIssue = function() {
-    console.log("🛠️ Fixing time issue...");
+window.addTestData = function() {
+    // Tambahkan data test untuk melihat multiple data points
+    console.log("🧪 Adding test data points...");
     
-    // Hapus semua history lama
+    const now = Date.now();
+    const testData = {
+        timestamp: now,
+        temperature: 26 + Math.random() * 2,
+        levelPercent: 50 + Math.random() * 15,
+        ntu: Math.random() * 200,
+        levelStatus: "SEDANG",
+        turbStatus: "JERNIH"
+    };
+    
+    addToLocalHistory(testData);
+    updateChartFromLocalHistory();
+    showAlert("Test data added! Total: " + localHistory.length + " data points", false);
+};
+
+window.clearHistory = function() {
     localHistory = [];
     localStorage.removeItem('sensorHistory');
-    
-    // Restart chart
     initializeChart();
-    
-    // Load data baru
-    fetchLatestData();
-    
-    showAlert("Time issue fixed! Chart reset dengan waktu yang benar.", false);
+    showAlert("History cleared!", false);
+    console.log("🗑️ Local history cleared");
 };
 
 // =========================
-// INITIALIZATION
+// INITIALIZATION - DENGAN DATA HISTORY
 // =========================
 document.addEventListener('DOMContentLoaded', function() {
-    console.log("🚀 DOM Loaded - Initializing Real-time Monitoring...");
+    console.log("🚀 DOM Loaded - Initializing Real-time Monitoring with History...");
     console.log("🕒 Current time:", getCurrentIndonesiaTime());
-    console.log("🌏 Browser Timezone:", Intl.DateTimeFormat().resolvedOptions().timeZone);
     
     // Load existing history
     loadLocalHistory();
     
+    // Generate sample data jika tidak ada data
+    generateSampleData();
+    
     // Initialize chart
     initializeChart();
     
-    // Jika ada history, update chart
+    // Update chart dengan data history yang ada
     if (localHistory.length > 0) {
         updateChartFromLocalHistory();
     }
@@ -441,10 +462,10 @@ document.addEventListener('DOMContentLoaded', function() {
         fetchLatestData();
     }, 1000);
     
-    // Auto-refresh setiap 5 detik
-    setInterval(fetchLatestData, 5000);
+    // Auto-refresh setiap 10 detik (kurangi frekuensi untuk hindari spam)
+    setInterval(fetchLatestData, 10000);
     
-    console.log("✅ Real-time monitoring initialized (5s interval)");
+    console.log("✅ Real-time monitoring with history initialized (10s interval)");
 });
 
 // Global error handler
