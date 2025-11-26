@@ -1,6 +1,6 @@
 // script.js
-import { db } from './firebase-config.js'; // Import database dari firebase-config.js
-import { ref, onValue } from "firebase/database"; // Menggunakan ref dan onValue dari Firebase SDK
+import { db } from './firebase-config.js';
+import { ref, onValue } from "firebase/database";
 
 // DOM Elements
 const tempEl = document.getElementById("temp");
@@ -13,35 +13,30 @@ const ctx = document.getElementById("chart").getContext("2d");
 
 let chart = null;
 
-// Firebase Database Reference (path yang sudah disesuaikan)
-const dataRef = ref(db, 'Tambak/DataTerbaru'); // Path yang benar sesuai dengan struktur Firebase Anda
+// Firebase Database Reference
+const dataRef = ref(db, 'Tambak/DataTerbaru'); // Path data Firebase
 
-// Listen for data changes in Firebase
+// Firebase Listener for Real-Time Data
 onValue(dataRef, (snapshot) => {
-  const data = snapshot.val();  // Mendapatkan data dari Firebase
-
+  const data = snapshot.val();
   if (data) {
     console.log("Data diterima:", data);
 
-    // Ambil data untuk chart
-    const labels = ["Now"];  // Karena hanya ada satu data terkini, gunakan "Now" untuk label
+    const labels = ["Now"];
     const tempData = [parseFloat(data.temperature) || 0];
     const levelData = [parseFloat(data.levelPercent) || 0];
     const ntuData = [parseFloat(data.ntu) || 0];
 
-    // Update chart
     createChart(labels, tempData, levelData, ntuData);
-
-    // Update UI
     updateUIElements(data);
   } else {
     console.log("Data tidak ada atau tidak valid.");
   }
 }, (error) => {
-  console.error("Error Firebase:", error);  // Log error jika ada masalah dengan koneksi Firebase
+  console.error("Error Firebase:", error);
 });
 
-// Fungsi untuk memperbarui elemen UI
+// Update UI with Data
 function updateUIElements(data) {
   const temperature = parseFloat(data.temperature) || 0;
   const levelPercent = parseFloat(data.levelPercent) || 0;
@@ -51,7 +46,6 @@ function updateUIElements(data) {
   if (levelEl) levelEl.textContent = levelPercent.toFixed(1) + "%";
   if (ntuEl) ntuEl.textContent = ntu.toFixed(1);
 
-  // Status suhu
   if (temperature >= 25 && temperature <= 30) {
     setStatus(tempStatusEl, "Ideal (25-30°C)", "status-good");
   } else if (temperature < 25) {
@@ -60,7 +54,6 @@ function updateUIElements(data) {
     setStatus(tempStatusEl, "Terlalu Panas", "status-warning");
   }
 
-  // Status level air
   if (levelPercent < 10) {
     setStatus(levelStatusEl, "Air Kurang - Perlu Ditambah", "status-danger");
   } else if (levelPercent <= 70) {
@@ -69,7 +62,6 @@ function updateUIElements(data) {
     setStatus(levelStatusEl, "Risiko Meluap", "status-warning");
   }
 
-  // Status NTU
   if (ntu < 200) {
     setStatus(ntuStatusEl, "Jernih", "status-good");
   } else if (ntu <= 1000) {
@@ -79,16 +71,16 @@ function updateUIElements(data) {
   }
 }
 
-// Fungsi untuk membuat chart history
+// Create Chart
 function createChart(labels, tempData, levelData, ntuData) {
   if (chart) {
-    chart.destroy();  // Hapus chart lama untuk update dengan data baru
+    chart.destroy();
   }
 
   chart = new Chart(ctx, {
     type: "line",
     data: {
-      labels: labels,  // Label berdasarkan timestamp
+      labels: labels,
       datasets: [
         {
           label: "Suhu (°C)",
@@ -137,7 +129,7 @@ function createChart(labels, tempData, levelData, ntuData) {
   });
 }
 
-// Fungsi untuk mengatur status (warna dan pesan)
+// Set Status
 function setStatus(el, text, cls) {
   if (el) {
     el.textContent = text;
