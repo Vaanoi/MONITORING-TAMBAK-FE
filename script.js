@@ -29,7 +29,7 @@ const chartCtx = chartCanvas ? chartCanvas.getContext("2d") : null;
 let localHistory = [];
 
 // =========================
-// FUNGSI UTILITAS WAKTU - DIPERBAIKI
+// FUNGSI UTILITAS WAKTU - FIXED FOR WIB
 // =========================
 function showLoading(show) {
     if (elements.loading) {
@@ -56,37 +56,44 @@ function setStatus(element, text, className) {
     }
 }
 
-// FUNGSI BARU: Format waktu yang benar
+// FUNGSI WAKTU YANG DIPERBAIKI - PAKAI WAKTU LOKAL BROWSER (WIB)
 function formatTime(timestamp) {
     const date = new Date(timestamp);
+    
+    // Gunakan toLocaleTimeString dengan locale Indonesia untuk WIB
+    const timeString = date.toLocaleTimeString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        timeZone: 'Asia/Jakarta' // Force WIB timezone
+    });
+    
     return {
-        time: `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`,
-        full: date.toLocaleTimeString('id-ID'),
-        date: date.toLocaleDateString('id-ID')
+        time: timeString,
+        full: date.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }),
+        date: date.toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' })
     };
 }
 
-// FUNGSI BARU: Handle timestamp dari Firebase
-function parseFirebaseTimestamp(timestamp) {
-    // Jika timestamp dari Firebase berupa angka kecil (seperti 650150), 
-    // kemungkinan itu adalah detik, bukan milidetik
-    if (timestamp && timestamp < 1000000000) {
-        console.log("🕒 Firebase timestamp detected (seconds):", timestamp);
-        return timestamp * 1000; // Convert detik ke milidetik
-    }
-    
-    // Jika timestamp sudah dalam milidetik, gunakan langsung
-    if (timestamp && timestamp > 1000000000000) {
-        return timestamp;
-    }
-    
-    // Jika tidak valid, gunakan waktu sekarang
-    console.log("🕒 Using current time for timestamp");
-    return Date.now();
+// FUNGSI BARU: Dapatkan waktu sekarang dalam WIB
+function getCurrentWIBTime() {
+    return new Date().toLocaleString('id-ID', {
+        timeZone: 'Asia/Jakarta',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+}
+
+// FUNGSI BARU: Buat timestamp WIB yang benar
+function createWIBTimestamp() {
+    const now = new Date();
+    // Convert ke WIB timezone
+    return new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' })).getTime();
 }
 
 // =========================
-// FUNGSI CHART - DIPERBAIKI
+// FUNGSI CHART - DIPERBAIKI UNTUK WIB
 // =========================
 function initializeChart() {
     if (!chartCtx) {
@@ -138,13 +145,12 @@ function initializeChart() {
             scales: {
                 x: {
                     display: true,
-                    title: { display: true, text: 'Waktu' },
+                    title: { display: true, text: 'Waktu (WIB)' },
                     ticks: {
-                        maxTicksLimit: 8, // Max 8 label untuk readability
+                        maxTicksLimit: 6,
                         callback: function(value, index, values) {
-                            // Hanya tampilkan beberapa label untuk menghindari overcrowding
-                            if (values.length <= 8) return this.getLabelForValue(value);
-                            return index % Math.ceil(values.length / 8) === 0 ? this.getLabelForValue(value) : '';
+                            if (values.length <= 6) return this.getLabelForValue(value);
+                            return index % Math.ceil(values.length / 6) === 0 ? this.getLabelForValue(value) : '';
                         }
                     }
                 },
@@ -159,10 +165,9 @@ function initializeChart() {
                 tooltip: {
                     callbacks: {
                         title: function(tooltipItems) {
-                            // Tampilkan waktu lengkap di tooltip
                             const dataIndex = tooltipItems[0].dataIndex;
                             const label = tooltipItems[0].chart.data.labels[dataIndex];
-                            return `Waktu: ${label}`;
+                            return `Waktu: ${label} WIB`;
                         }
                     }
                 }
@@ -170,19 +175,20 @@ function initializeChart() {
         }
     });
 
-    console.log("✅ Chart initialized");
+    console.log("✅ Chart initialized for WIB timezone");
 }
 
 function updateChartFromLocalHistory() {
     if (!chart || localHistory.length === 0) return;
 
     try {
-        // Ambil maksimal 15 data terbaru untuk performance
-        const recentData = localHistory.slice(-15);
+        // Ambil maksimal 12 data terbaru
+        const recentData = localHistory.slice(-12);
         
         console.log("📊 Updating chart with:", recentData.length, "data points");
+        console.log("🕒 Current WIB time:", getCurrentWIBTime());
         
-        // Format labels dengan waktu yang benar
+        // Format labels dengan waktu WIB
         const labels = recentData.map(item => {
             const timeInfo = formatTime(item.timestamp);
             return timeInfo.time;
@@ -192,13 +198,6 @@ function updateChartFromLocalHistory() {
         const levelData = recentData.map(item => item.levelPercent);
         const ntuData = recentData.map(item => item.ntu);
 
-        // Debug: Tampilkan data terbaru
-        if (recentData.length > 0) {
-            const latest = recentData[recentData.length - 1];
-            const latestTime = formatTime(latest.timestamp);
-            console.log("🕒 Latest data time:", latestTime.full);
-        }
-
         // Update chart
         chart.data.labels = labels;
         chart.data.datasets[0].data = tempData;
@@ -207,7 +206,7 @@ function updateChartFromLocalHistory() {
         
         chart.update('active');
         
-        console.log(`✅ Chart updated at ${new Date().toLocaleTimeString()}`);
+        console.log(`✅ Chart updated at ${getCurrentWIBTime()} WIB`);
         
     } catch (error) {
         console.error("❌ Error updating chart from local history:", error);
@@ -215,10 +214,11 @@ function updateChartFromLocalHistory() {
 }
 
 // =========================
-// FUNGSI DATA HANDLING - DIPERBAIKI
+// FUNGSI DATA HANDLING - GUNAKAN WAKTU WIB
 // =========================
 async function fetchLatestData() {
     console.log("🔄 Fetching latest data...");
+    console.log("🕒 Current WIB:", getCurrentWIBTime());
     
     try {
         showLoading(true);
@@ -235,7 +235,7 @@ async function fetchLatestData() {
         // Update UI
         updateUI(data);
         
-        // Tambahkan ke local history dengan timestamp yang benar
+        // Tambahkan ke local history dengan timestamp WIB
         addToLocalHistory(data);
         
         // Update chart dengan data real-time
@@ -251,19 +251,13 @@ async function fetchLatestData() {
 
 function addToLocalHistory(data) {
     try {
-        // Parse timestamp dengan benar
-        const correctedTimestamp = parseFirebaseTimestamp(data.timestamp);
-        const now = Date.now();
+        // GUNAKAN WAKTU SEKARANG DALAM WIB - abaikan timestamp dari Firebase
+        const wibTimestamp = createWIBTimestamp();
         
-        console.log("🕒 Timestamp info:", {
-            original: data.timestamp,
-            corrected: correctedTimestamp,
-            current: now,
-            difference: now - correctedTimestamp
-        });
+        console.log("🕒 Using WIB timestamp:", formatTime(wibTimestamp).full);
 
         const historyItem = {
-            timestamp: correctedTimestamp,
+            timestamp: wibTimestamp, // Gunakan waktu WIB sekarang
             temperature: parseFloat(data.temperature) || 0,
             levelPercent: parseFloat(data.levelPercent) || 0,
             ntu: parseFloat(data.ntu) || 0,
@@ -271,22 +265,28 @@ function addToLocalHistory(data) {
             turbStatus: data.turbStatus || ""
         };
 
-        // Cek apakah data benar-benar baru (beda dengan data terakhir)
+        // Cek apakah data benar-benar baru (minimal 10 detik dari data terakhir)
         const isNewData = localHistory.length === 0 || 
-                         (correctedTimestamp - localHistory[localHistory.length - 1].timestamp) > 5000; // 5 detik
+                         (wibTimestamp - localHistory[localHistory.length - 1].timestamp) > 10000;
 
         if (isNewData) {
             localHistory.push(historyItem);
             
-            // Simpan ke localStorage untuk persistensi
-            if (localHistory.length > 30) { // Max 30 data points
-                localHistory = localHistory.slice(-30);
+            // Simpan ke localStorage
+            if (localHistory.length > 25) {
+                localHistory = localHistory.slice(-25);
             }
             
             localStorage.setItem('sensorHistory', JSON.stringify(localHistory));
-            console.log("📝 Added to local history at:", formatTime(correctedTimestamp).full);
+            console.log("📝 Added to local history at WIB:", formatTime(wibTimestamp).time);
         } else {
             console.log("⏭️ Skipping duplicate data");
+            // Tapi update data terakhir dengan nilai terbaru
+            if (localHistory.length > 0) {
+                const lastIndex = localHistory.length - 1;
+                localHistory[lastIndex] = historyItem;
+                localStorage.setItem('sensorHistory', JSON.stringify(localHistory));
+            }
         }
         
     } catch (error) {
@@ -301,10 +301,9 @@ function loadLocalHistory() {
             localHistory = JSON.parse(saved);
             console.log("📂 Loaded local history:", localHistory.length, "items");
             
-            // Tampilkan waktu data terakhir
             if (localHistory.length > 0) {
                 const lastTime = formatTime(localHistory[localHistory.length - 1].timestamp);
-                console.log("🕒 Last data time:", lastTime.full);
+                console.log("🕒 Last data time (WIB):", lastTime.full);
             }
         }
     } catch (error) {
@@ -323,7 +322,7 @@ function updateUI(data) {
         // Update status
         updateStatus(data);
         
-        // Update last update time
+        // Update last update time display
         updateLastUpdateTime();
         
     } catch (error) {
@@ -331,16 +330,20 @@ function updateUI(data) {
     }
 }
 
-// FUNGSI BARU: Tampilkan waktu update terakhir
+// FUNGSI BARU: Tampilkan waktu update terakhir dalam WIB
 function updateLastUpdateTime() {
     const now = new Date();
-    const timeString = now.toLocaleTimeString('id-ID');
-    const dateString = now.toLocaleDateString('id-ID');
+    const timeString = now.toLocaleTimeString('id-ID', { 
+        timeZone: 'Asia/Jakarta',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
     
-    console.log("🕒 Data updated at:", timeString);
+    console.log("🕒 Data updated at (WIB):", timeString);
     
-    // Bisa tambahkan elemen untuk menampilkan waktu update jika mau
-    // Contoh: document.getElementById('lastUpdate').textContent = `Terakhir update: ${timeString}`;
+    // Optional: Tambahkan elemen untuk menampilkan waktu update
+    // Contoh: document.getElementById('lastUpdate').textContent = `Terakhir update: ${timeString} WIB`;
 }
 
 function updateStatus(data) {
@@ -400,45 +403,49 @@ window.logout = function() {
 window.updateData = fetchLatestData;
 
 window.debugTime = function() {
-    console.log("🕒 Time Debug Info:");
-    console.log("- Current time:", new Date().toLocaleString('id-ID'));
+    console.log("🕒 WIB Time Debug Info:");
+    console.log("- Current WIB time:", getCurrentWIBTime());
+    console.log("- Browser timezone:", Intl.DateTimeFormat().resolvedOptions().timeZone);
     console.log("- Local history length:", localHistory.length);
     
     if (localHistory.length > 0) {
-        console.log("- Latest 3 data points:");
+        console.log("- Latest 3 data points (WIB):");
         localHistory.slice(-3).forEach((item, index) => {
             const timeInfo = formatTime(item.timestamp);
-            console.log(`  ${index + 1}. ${timeInfo.full} - Temp: ${item.temperature}°C`);
+            console.log(`  ${index + 1}. ${timeInfo.time} - Temp: ${item.temperature}°C`);
         });
     }
-    
-    console.log("- Chart instance:", chart ? "Exists" : "Null");
 };
 
-window.simulateNewData = function() {
-    // Fungsi untuk testing: tambah data dummy dengan timestamp sekarang
-    const testData = {
-        timestamp: Date.now(),
-        temperature: 25 + Math.random() * 5,
-        levelPercent: 40 + Math.random() * 30,
-        ntu: Math.random() * 500,
-        levelStatus: "SEDANG",
-        turbStatus: "JERNIH"
-    };
+window.fixChartTime = function() {
+    // Fungsi untuk memperbaiki waktu chart dengan timestamp WIB sekarang
+    console.log("🛠️ Fixing chart times with WIB...");
     
-    addToLocalHistory(testData);
-    updateChartFromLocalHistory();
-    showAlert("Data test ditambahkan!", false);
+    if (localHistory.length > 0) {
+        // Update semua timestamp dengan waktu WIB yang sesuai
+        const now = createWIBTimestamp();
+        const timeInterval = 60000; // 1 menit per data
+        
+        localHistory.forEach((item, index) => {
+            const dataIndex = localHistory.length - 1 - index;
+            item.timestamp = now - (dataIndex * timeInterval);
+        });
+        
+        localStorage.setItem('sensorHistory', JSON.stringify(localHistory));
+        updateChartFromLocalHistory();
+        showAlert("Waktu chart telah diperbaiki ke WIB!", false);
+    }
 };
 
 // =========================
-// INITIALIZATION - DIPERBAIKI
+// INITIALIZATION - DENGAN WIB
 // =========================
 document.addEventListener('DOMContentLoaded', function() {
-    console.log("🚀 DOM Loaded - Initializing REAL-TIME monitoring...");
-    console.log("🕒 Current time:", new Date().toLocaleString('id-ID'));
+    console.log("🚀 DOM Loaded - Initializing WIB Real-time Monitoring...");
+    console.log("🕒 Current WIB Time:", getCurrentWIBTime());
+    console.log("🌏 Browser Timezone:", Intl.DateTimeFormat().resolvedOptions().timeZone);
     
-    // Load existing history dari localStorage
+    // Load existing history
     loadLocalHistory();
     
     // Initialize chart
@@ -454,10 +461,10 @@ document.addEventListener('DOMContentLoaded', function() {
         fetchLatestData();
     }, 1000);
     
-    // Auto-refresh data terbaru setiap 5 detik
+    // Auto-refresh setiap 5 detik
     setInterval(fetchLatestData, 5000);
     
-    console.log("✅ Real-time monitoring initialized (5s interval)");
+    console.log("✅ WIB Real-time monitoring initialized (5s interval)");
 });
 
 // Global error handler
